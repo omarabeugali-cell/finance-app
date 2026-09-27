@@ -103,16 +103,16 @@ function App() {
 
   async function loadAccounts() {
     const supabase = getSupabaseClient()
-    const { data, error } = await supabase.from('accounts').select('*')
+    const result = await supabase.from('accounts').select('*')
 
-    if (error) {
-      setStatus('Ошибка загрузки счетов: ' + error.message)
+    if (result.error) {
+      setStatus('Ошибка загрузки счетов: ' + result.error.message)
       return
     }
 
-    setAccounts(data as Account[])
+    setAccounts(result.data as Account[])
   }
-
+  
   function getEndOfMonth(): Date {
     const now = new Date()
     return new Date(now.getFullYear(), now.getMonth() + 1, 0)
@@ -121,61 +121,58 @@ function App() {
   async function loadFinancialSummary() {
     const supabase = getSupabaseClient()
 
-    // 1. Фактический баланс — сумма остатков по всем счетам
-    const { data: accountsData, error: accountsError } = await supabase
-      .from('accounts')
-      .select('balance')
+    const accountsResult = await supabase.from('accounts').select('balance')
 
-    if (accountsError) {
-      setStatus('Ошибка загрузки баланса: ' + accountsError.message)
+    if (accountsResult.error) {
+      setStatus('Ошибка загрузки баланса: ' + accountsResult.error.message)
       return
     }
 
-    const totalBalance = (accountsData as { balance: number }[]).reduce(
-      (sum, acc) => sum + Number(acc.balance),
-      0
-    )
+    let totalBalance = 0
+    const accountsList = accountsResult.data as { balance: number }[]
+    for (let i = 0; i < accountsList.length; i++) {
+      totalBalance = totalBalance + Number(accountsList[i].balance)
+    }
     setFactualBalance(totalBalance)
 
-    // 2. Зарезервировано под обязательные платежи до конца месяца
     const endOfMonth = getEndOfMonth()
     const endOfMonthStr = endOfMonth.toISOString().split('T')[0]
 
-    const { data: obligationsData, error: obligationsError } = await supabase
+    const obligationsResult = await supabase
       .from('obligations')
       .select('id, amount, next_date, is_active')
       .eq('is_active', true)
       .lte('next_date', endOfMonthStr)
 
-    if (obligationsError) {
-      setStatus('Ошибка загрузки платежей: ' + obligationsError.message)
+    if (obligationsResult.error) {
+      setStatus('Ошибка загрузки платежей: ' + obligationsResult.error.message)
       return
     }
 
-    const totalObligations = (obligationsData as Obligation[]).reduce(
-      (sum, o) => sum + Number(o.amount),
-      0
-    )
+    let totalObligations = 0
+    const obligationsList = obligationsResult.data as Obligation[]
+    for (let i = 0; i < obligationsList.length; i++) {
+      totalObligations = totalObligations + Number(obligationsList[i].amount)
+    }
     setReservedObligations(totalObligations)
 
-    // 3. Зарезервировано под регулярные пополнения накоплений
-    const { data: savingsData, error: savingsError } = await supabase
+    const savingsResult = await supabase
       .from('savings_goals')
       .select('id, monthly_contribution, is_active')
       .eq('is_active', true)
 
-    if (savingsError) {
-      setStatus('Ошибка загрузки накоплений: ' + savingsError.message)
+    if (savingsResult.error) {
+      setStatus('Ошибка загрузки накоплений: ' + savingsResult.error.message)
       return
     }
 
-    const totalSavings = (savingsData as SavingsGoal[]).reduce(
-      (sum, g) => sum + Number(g.monthly_contribution ?? 0),
-      0
-    )
+    let totalSavings = 0
+    const savingsList = savingsResult.data as SavingsGoal[]
+    for (let i = 0; i < savingsList.length; i++) {
+      totalSavings = totalSavings + Number(savingsList[i].monthly_contribution ?? 0)
+    }
     setReservedSavings(totalSavings)
 
-    // 4. Сколько дней осталось до конца периода (минимум 1, чтобы не делить на ноль)
     const now = new Date()
     const msLeft = endOfMonth.getTime() - now.getTime()
     const days = Math.max(1, Math.ceil(msLeft / (1000 * 60 * 60 * 24)))
@@ -183,36 +180,35 @@ function App() {
   }
 
   async function createAccount() {
-    if (!newAccountName.trim()) return
-
-    const supabase = getSupabaseClient()
-
-    const { data: userRow, error: userError } = await supabase
-      .from('users')
-      .select('id')
-      .single()
-
-    if (userError || !userRow) {
-      setStatus('Не удалось определить пользователя: ' + userError?.message)
+    if (!newAccountName.trim()) {
       return
     }
 
-    const { error } = await supabase.from('accounts').insert({
-      user_id: userRow.id,
+    const supabase = getSupabaseClient()
+
+    const userResult = await supabase.from('users').select('id').single()
+
+    if (userResult.error || !userResult.data) {
+      setStatus('Не удалось определить пользователя')
+      return
+    }
+
+    const insertResult = await supabase.from('accounts').insert({
+      user_id: userResult.data.id,
       name: newAccountName.trim(),
       balance: 0,
       currency: 'KZT',
     })
 
-    if (error) {
-      setStatus('Ошибка создания счёта: ' + error.message)
+    if (insertResult.error) {
+      setStatus('Ошибка создания счёта: ' + insertResult.error.message)
       return
     }
 
     setNewAccountName('')
     loadEverything()
   }
-
+  
   if (!isAuthed) {
     return (
       <div style={{ padding: '40px', fontFamily: 'sans-serif' }}>
@@ -230,17 +226,40 @@ function App() {
 
       {status && <p style={{ color: 'red' }}>{status}</p>}
 
-      <div
-        style={{
-          background: '#1c1c1e',
-          color: 'white',
-          borderRadius: '12px',
-          padding: '16px',
-          marginBottom: '20px',
-        }}
-      >
-        <p style={{ margin: '4px 0' }}>Фактический баланс: <strong>{factualBalance.toLocaleString()} ₸</strong></p>
-        <p style={{ margin: '4px 0', color: '#aaa' }}>Зарезервировано на платежи: {reservedObligations.toLocaleString()} ₸</p>
-        <p style={{ margin: '4px 0', color: '#aaa' }}>Зарезервировано на накопления: {reservedSavings.toLocaleString()} ₸</p>
-        <hr style={{ border: 'none', borderTop: '1px solid #333', margin: '8px 0' }} />
-        <p style={{ margin: '4px 0' }}>Свободные деньги:
+      <div style={{ background: '#1c1c1e', color: 'white', borderRadius: '12px', padding: '16px', marginBottom: '20px' }}>
+        <p>Фактический баланс: {factualBalance}</p>
+        <p>Зарезервировано на платежи: {reservedObligations}</p>
+        <p>Зарезервировано на накопления: {reservedSavings}</p>
+        <p>Свободные деньги: {freeMoney}</p>
+        <p>Дневной лимит: {Math.round(dailyLimit)} ({daysLeft} дн.)</p>
+      </div>
+
+      <h2>Мои счета</h2>
+
+      {accounts.length === 0 && <p>Пока нет ни одного счёта.</p>}
+
+      <ul style={{ listStyle: 'none', padding: 0 }}>
+        {accounts.map((acc) => (
+          <li key={acc.id} style={{ padding: '12px', marginBottom: '8px', background: '#1c1c1e', color: 'white', borderRadius: '8px' }}>
+            {acc.name} — {acc.balance} {acc.currency}
+          </li>
+        ))}
+      </ul>
+
+      <div style={{ marginTop: '20px' }}>
+        <input
+          type="text"
+          value={newAccountName}
+          onChange={(e) => setNewAccountName(e.target.value)}
+          placeholder="Например, Наличные"
+          style={{ padding: '8px', marginRight: '8px' }}
+        />
+        <button onClick={createAccount} style={{ padding: '8px 16px' }}>
+          Добавить счёт
+        </button>
+      </div>
+    </div>
+  )
+}
+
+export default App
