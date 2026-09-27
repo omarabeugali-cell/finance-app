@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
+import { getSupabaseClient } from './supabaseClient'
 
-// Сообщаем TypeScript, что в браузере появится глобальный объект Telegram
 declare global {
   interface Window {
     Telegram?: {
@@ -13,16 +13,25 @@ declare global {
   }
 }
 
+type Account = {
+  id: number
+  name: string
+  balance: number
+  currency: string
+}
+
 function App() {
   const [status, setStatus] = useState('Загрузка...')
-  const [userName, setUserName] = useState<string | null>(null)
+  const [isAuthed, setIsAuthed] = useState(false)
+  const [accounts, setAccounts] = useState<Account[]>([])
+  const [newAccountName, setNewAccountName] = useState('')
 
   useEffect(() => {
     async function authenticate() {
       const tg = window.Telegram?.WebApp
 
       if (!tg) {
-        setStatus('Открой это приложение через кнопку бота в Telegram, а не в обычном браузере.')
+        setStatus('Открой это приложение через кнопку бота в Telegram.')
         return
       }
 
@@ -32,7 +41,7 @@ function App() {
       const initData = tg.initData
 
       if (!initData) {
-        setStatus('Нет данных Telegram (initData пустой). Попробуй открыть заново через бота.')
+        setStatus('Нет данных Telegram. Попробуй открыть заново через бота.')
         return
       }
 
@@ -58,15 +67,9 @@ function App() {
         }
 
         localStorage.setItem('supabase_jwt', data.token)
-
-        const params = new URLSearchParams(initData)
-        const userJson = params.get('user')
-        if (userJson) {
-          const user = JSON.parse(userJson)
-          setUserName(user.first_name ?? 'пользователь')
-        }
-
-        setStatus('Авторизация прошла успешно!')
+        setIsAuthed(true)
+        setStatus('')
+        loadAccounts()
       } catch (err) {
         setStatus('Ошибка сети: ' + String(err))
       }
@@ -75,11 +78,95 @@ function App() {
     authenticate()
   }, [])
 
+  async function loadAccounts() {
+    const supabase = getSupabaseClient()
+    const { data, error } = await supabase.from('accounts').select('*')
+
+    if (error) {
+      setStatus('Ошибка загрузки счетов: ' + error.message)
+      return
+    }
+
+    setAccounts(data as Account[])
+  }
+
+  async function createAccount() {
+    if (!newAccountName.trim()) return
+
+    const supabase = getSupabaseClient()
+
+    // Находим свою собственную строку в users, чтобы указать user_id
+    const { data: userRow, error: userError } = await supabase
+      .from('users')
+      .select('id')
+      .single()
+
+    if (userError || !userRow) {
+      setStatus('Не удалось определить пользователя: ' + userError?.message)
+      return
+    }
+
+    const { error } = await supabase.from('accounts').insert({
+      user_id: userRow.id,
+      name: newAccountName.trim(),
+      balance: 0,
+      currency: 'KZT',
+    })
+
+    if (error) {
+      setStatus('Ошибка создания счёта: ' + error.message)
+      return
+    }
+
+    setNewAccountName('')
+    loadAccounts()
+  }
+
+  if (!isAuthed) {
+    return (
+      <div style={{ padding: '40px', fontFamily: 'sans-serif' }}>
+        <p>{status}</p>
+      </div>
+    )
+  }
+
   return (
-    <div style={{ padding: '40px', fontFamily: 'sans-serif' }}>
-      <h1>Финансовый помощник</h1>
-      <p>{status}</p>
-      {userName && <p>Привет, {userName}!</p>}
+    <div style={{ padding: '20px', fontFamily: 'sans-serif' }}>
+      <h1>Мои счета</h1>
+
+      {status && <p style={{ color: 'red' }}>{status}</p>}
+
+      {accounts.length === 0 && <p>Пока нет ни одного счёта.</p>}
+
+      <ul style={{ listStyle: 'none', padding: 0 }}>
+        {accounts.map((acc) => (
+          <li
+            key={acc.id}
+            style={{
+              padding: '12px',
+              marginBottom: '8px',
+              background: '#1c1c1e',
+              color: 'white',
+              borderRadius: '8px',
+            }}
+          >
+            <strong>{acc.name}</strong> — {acc.balance} {acc.currency}
+          </li>
+        ))}
+      </ul>
+
+      <div style={{ marginTop: '20px' }}>
+        <input
+          type="text"
+          value={newAccountName}
+          onChange={(e) => setNewAccountName(e.target.value)}
+          placeholder="Например, Наличные"
+          style={{ padding: '8px', marginRight: '8px' }}
+        />
+        <button onClick={createAccount} style={{ padding: '8px 16px' }}>
+          Добавить счёт
+        </button>
+      </div>
     </div>
   )
 }

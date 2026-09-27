@@ -1,7 +1,7 @@
 import { createClient } from 'npm:@supabase/supabase-js@2'
 
 // Секреты, которые мы положили в Edge Function Secrets на прошлых шагах
-const BOT_TOKEN = Deno.env.get('TELEGRAM_BOT_TOKEN')!
+const BOT_TOKEN = Deno.env.get('TELEGRAM_BOT_TOKEN')!.trim()
 const JWT_SECRET = Deno.env.get('JWT_SECRET')!
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!
 const SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
@@ -42,8 +42,7 @@ async function verifyTelegramInitData(initData: string): Promise<Record<string, 
   const computedHashBytes = await hmacSha256(secretKey, encoder.encode(dataCheckString))
   const computedHash = Array.from(computedHashBytes).map(b => b.toString(16).padStart(2, '0')).join('')
 
-  if (computedHash !== hash) return null
-
+    if (computedHash !== hash) return null
   const result: Record<string, string> = {}
   for (const [key, value] of params.entries()) result[key] = value
   return result
