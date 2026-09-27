@@ -27,12 +27,28 @@ type Obligation = {
   is_active: boolean
 }
 
+type ObligationItem = {
+  id: number
+  name: string
+  amount: number
+  next_date: string
+  is_active: boolean
+}
+
 type SavingsGoal = {
   id: number
   monthly_contribution: number | null
   is_active: boolean
 }
 
+type SavingsGoalItem = {
+  id: number
+  name: string
+  target_amount: number
+  current_amount: number
+  monthly_contribution: number | null
+  is_active: boolean
+}
 function App() {
   const [status, setStatus] = useState('Загрузка...')
   const [isAuthed, setIsAuthed] = useState(false)
@@ -43,6 +59,15 @@ function App() {
   const [reservedObligations, setReservedObligations] = useState(0)
   const [reservedSavings, setReservedSavings] = useState(0)
   const [daysLeft, setDaysLeft] = useState(1)
+  
+  const [obligations, setObligations] = useState<ObligationItem[]>([])
+  const [newObligationName, setNewObligationName] = useState('')
+  const [newObligationAmount, setNewObligationAmount] = useState('')
+  const [newObligationDate, setNewObligationDate] = useState('')
+
+  const [savingsGoals, setSavingsGoals] = useState<SavingsGoalItem[]>([])
+  const [newGoalName, setNewGoalName] = useState('')
+  const [newGoalTarget, setNewGoalTarget] = useState('') 
 
   useEffect(() => {
     async function authenticate() {
@@ -99,8 +124,9 @@ function App() {
   async function loadEverything() {
     await loadAccounts()
     await loadFinancialSummary()
+    await loadObligations()
+    await loadSavingsGoals()
   }
-
   async function loadAccounts() {
     const supabase = getSupabaseClient()
     const result = await supabase.from('accounts').select('*')
@@ -116,6 +142,103 @@ function App() {
   function getEndOfMonth(): Date {
     const now = new Date()
     return new Date(now.getFullYear(), now.getMonth() + 1, 0)
+  }
+  
+  async function loadObligations() {
+    const supabase = getSupabaseClient()
+    const result = await supabase
+      .from('obligations')
+      .select('id, name, amount, next_date, is_active')
+      .eq('is_active', true)
+      .order('next_date', { ascending: true })
+
+    if (result.error) {
+      setStatus('Ошибка загрузки платежей: ' + result.error.message)
+      return
+    }
+
+    setObligations(result.data as ObligationItem[])
+  }
+
+  async function createObligation() {
+    if (!newObligationName.trim() || !newObligationAmount || !newObligationDate) {
+      return
+    }
+
+    const supabase = getSupabaseClient()
+
+    const userResult = await supabase.from('users').select('id').single()
+
+    if (userResult.error || !userResult.data) {
+      setStatus('Не удалось определить пользователя')
+      return
+    }
+
+    const insertResult = await supabase.from('obligations').insert({
+      user_id: userResult.data.id,
+      name: newObligationName.trim(),
+      amount: Number(newObligationAmount),
+      next_date: newObligationDate,
+      is_recurring: false,
+      is_active: true,
+    })
+
+    if (insertResult.error) {
+      setStatus('Ошибка создания платежа: ' + insertResult.error.message)
+      return
+    }
+
+    setNewObligationName('')
+    setNewObligationAmount('')
+    setNewObligationDate('')
+    loadEverything()
+  }
+
+  async function loadSavingsGoals() {
+    const supabase = getSupabaseClient()
+    const result = await supabase
+      .from('savings_goals')
+      .select('id, name, target_amount, current_amount, monthly_contribution, is_active')
+      .eq('is_active', true)
+
+    if (result.error) {
+      setStatus('Ошибка загрузки накоплений: ' + result.error.message)
+      return
+    }
+
+    setSavingsGoals(result.data as SavingsGoalItem[])
+  }
+
+  async function createSavingsGoal() {
+    if (!newGoalName.trim() || !newGoalTarget) {
+      return
+    }
+
+    const supabase = getSupabaseClient()
+
+    const userResult = await supabase.from('users').select('id').single()
+
+    if (userResult.error || !userResult.data) {
+      setStatus('Не удалось определить пользователя')
+      return
+    }
+
+    const insertResult = await supabase.from('savings_goals').insert({
+      user_id: userResult.data.id,
+      name: newGoalName.trim(),
+      target_amount: Number(newGoalTarget),
+      current_amount: 0,
+      is_active: true,
+    })
+
+    if (insertResult.error) {
+      setStatus('Ошибка создания цели: ' + insertResult.error.message)
+      return
+    }
+
+    setNewGoalName('')
+    setNewGoalTarget('')
+    loadEverything()
   }
 
   async function loadFinancialSummary() {
@@ -258,7 +381,78 @@ function App() {
           Добавить счёт
         </button>
       </div>
+      
+      <h2>Обязательные платежи</h2>
+
+      {obligations.length === 0 && <p>Пока нет ни одного платежа.</p>}
+
+      <ul style={{ listStyle: 'none', padding: 0 }}>
+        {obligations.map((o) => (
+          <li key={o.id} style={{ padding: '12px', marginBottom: '8px', background: '#1c1c1e', color: 'white', borderRadius: '8px' }}>
+            {o.name} — {o.amount} ₸ (до {o.next_date})
+          </li>
+        ))}
+      </ul>
+
+      <div style={{ marginTop: '10px', marginBottom: '30px' }}>
+        <input
+          type="text"
+          value={newObligationName}
+          onChange={(e) => setNewObligationName(e.target.value)}
+          placeholder="Название, например Кредит"
+          style={{ padding: '8px', marginRight: '8px', marginBottom: '8px' }}
+        />
+        <input
+          type="number"
+          value={newObligationAmount}
+          onChange={(e) => setNewObligationAmount(e.target.value)}
+          placeholder="Сумма"
+          style={{ padding: '8px', marginRight: '8px', marginBottom: '8px' }}
+        />
+        <input
+          type="date"
+          value={newObligationDate}
+          onChange={(e) => setNewObligationDate(e.target.value)}
+          style={{ padding: '8px', marginRight: '8px', marginBottom: '8px' }}
+        />
+        <button onClick={createObligation} style={{ padding: '8px 16px' }}>
+          Добавить платёж
+        </button>
+      </div>
+
+      <h2>Накопления</h2>
+
+      {savingsGoals.length === 0 && <p>Пока нет ни одной цели.</p>}
+
+      <ul style={{ listStyle: 'none', padding: 0 }}>
+        {savingsGoals.map((g) => (
+          <li key={g.id} style={{ padding: '12px', marginBottom: '8px', background: '#1c1c1e', color: 'white', borderRadius: '8px' }}>
+            {g.name} — {g.current_amount} из {g.target_amount} ₸
+          </li>
+        ))}
+      </ul>
+
+      <div style={{ marginTop: '10px' }}>
+        <input
+          type="text"
+          value={newGoalName}
+          onChange={(e) => setNewGoalName(e.target.value)}
+          placeholder="Название, например Машина"
+          style={{ padding: '8px', marginRight: '8px', marginBottom: '8px' }}
+        />
+        <input
+          type="number"
+          value={newGoalTarget}
+          onChange={(e) => setNewGoalTarget(e.target.value)}
+          placeholder="Целевая сумма"
+          style={{ padding: '8px', marginRight: '8px', marginBottom: '8px' }}
+        />
+        <button onClick={createSavingsGoal} style={{ padding: '8px 16px' }}>
+          Добавить цель
+        </button>
+      </div>
     </div>
+    
   )
 }
 
